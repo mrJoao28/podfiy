@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Home,
   Search,
@@ -18,7 +18,7 @@ import {
   RotateCcw,
   RotateCw,
   Heart,
-  ChevronDown,
+  ArrowLeft,
   MoreHorizontal,
   Volume2,
   Timer,
@@ -28,6 +28,8 @@ import { useLibrary } from "./provider";
 import { usePlayer } from "./player";
 import { Cover, EpisodeRow } from "./ui";
 import { formatTime, streak } from "@/lib/stats";
+import { ProgressRing } from "./progress-ring";
+import { GoalMilestone } from "./daily-goal";
 const tabs = [
   { href: "/", label: "Início", icon: Home },
   { href: "/buscar", label: "Buscar", icon: Search },
@@ -44,6 +46,43 @@ export function Shell({ children }: { children: React.ReactNode }) {
     if ("serviceWorker" in navigator)
       navigator.serviceWorker.register("/sw.js").catch(() => {});
   }, []);
+  useEffect(() => {
+    const closeOutside = (event: PointerEvent) =>
+      document
+        .querySelectorAll<HTMLDetailsElement>("details.dropdown[open]")
+        .forEach((menu) => {
+          if (event.target instanceof Node && !menu.contains(event.target))
+            menu.open = false;
+        });
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const menu = document.querySelector<HTMLDetailsElement>(
+        "details.dropdown[open]",
+      );
+      if (menu) {
+        event.preventDefault();
+        menu.open = false;
+        menu.querySelector<HTMLElement>("summary")?.focus();
+      }
+    };
+    const closeAction = (event: MouseEvent) => {
+      if (
+        event.target instanceof Element &&
+        event.target.closest(".dropdown-menu button, .dropdown-menu a")
+      ) {
+        const menu = event.target.closest("details");
+        if (menu) menu.open = false;
+      }
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    document.addEventListener("click", closeAction);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+      document.removeEventListener("click", closeAction);
+    };
+  }, []);
   return (
     <>
       <aside className="sidebar">
@@ -54,12 +93,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
           podfiy<span className="brand-dot">.</span>
         </Link>
         <div className="sidebar-label">SEU UNIVERSO SONORO</div>
-        <nav>
+        <nav aria-label="Navegação principal">
           {tabs.map((t) => (
             <Link
               key={t.href}
               href={t.href}
               className={path === t.href ? "active" : ""}
+              aria-current={path === t.href ? "page" : undefined}
             >
               <t.icon size={20} />
               {t.label === "Config" ? "Configurações" : t.label}
@@ -111,7 +151,14 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </Link>
         </div>
       </aside>
-      <main className={`main ${player.episode ? "has-player" : ""}`}>
+      <a className="skip-link" href="#conteudo">
+        Pular para o conteúdo
+      </a>
+      <main
+        id="conteudo"
+        tabIndex={-1}
+        className={`main ${player.episode ? "has-player" : ""}`}
+      >
         <header className="topbar">
           <Link href="/" className="mobile-brand">
             podfiy<span>.</span>
@@ -135,12 +182,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <span>podfiy © {new Date().getFullYear()}</span>
         </footer>
       </main>
-      <nav className="mobile-nav">
+      <nav className="mobile-nav" aria-label="Navegação principal no celular">
         {tabs.map((t) => (
           <Link
             key={t.href}
             href={t.href}
             className={path === t.href ? "active" : ""}
+            aria-current={path === t.href ? "page" : undefined}
           >
             <t.icon size={21} />
             <span>{t.label}</span>
@@ -149,6 +197,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
       </nav>
       {player.episode && <MiniPlayer />}
       {player.expanded && player.episode && <NowPlaying />}
+      <GoalMilestone />
     </>
   );
 }
@@ -172,7 +221,12 @@ function MiniPlayer() {
           } as React.CSSProperties
         }
       />
-      <button className="mini-track" onClick={() => p.setExpanded(true)}>
+      <button
+        className="mini-track"
+        aria-label={`Abrir Tocando agora: ${e.title}`}
+        aria-haspopup="dialog"
+        onClick={() => p.setExpanded(true)}
+      >
         <Cover src={e.image} title="" />
         <div>
           <b>{e.title}</b>
@@ -182,6 +236,7 @@ function MiniPlayer() {
       <button
         className={`icon-button mini-heart ${library.favorites.some((x) => x.id === e.id) ? "accent" : ""}`}
         aria-label="Favoritar"
+        aria-pressed={library.favorites.some((x) => x.id === e.id)}
         onClick={() => favorite(e)}
       >
         <Heart size={19} />
@@ -245,7 +300,7 @@ function MiniPlayer() {
           className="speed-control"
           onClick={() => p.setSpeed(p.speed >= 2 ? 0.75 : p.speed + 0.25)}
         >
-          {p.speed}×
+          {p.speed.toLocaleString("pt-BR")}×
         </button>
         <button
           className="icon-button"
@@ -262,24 +317,33 @@ function NowPlaying() {
   const p = usePlayer();
   const { library, favorite, enqueue, setMessage } = useLibrary();
   const [description, setDescription] = useState(false);
+  const dialog = useRef<HTMLDialogElement>(null);
   const e = p.episode!;
-  const percent = p.duration ? Math.min(1, p.position / p.duration) : 0;
-  function ringSeek(event: React.PointerEvent<SVGSVGElement>) {
-    const rect = event.currentTarget.getBoundingClientRect();
-    const x = event.clientX - rect.left - rect.width / 2;
-    const y = event.clientY - rect.top - rect.height / 2;
-    const angle =
-      (Math.atan2(y, x) + Math.PI / 2 + Math.PI * 2) % (Math.PI * 2);
-    p.seek((angle / (Math.PI * 2)) * p.duration);
-  }
+  useEffect(() => {
+    const element = dialog.current;
+    const previous = document.activeElement as HTMLElement | null;
+    const overflow = document.body.style.overflow;
+    element?.showModal();
+    document.body.style.overflow = "hidden";
+    return () => {
+      element?.close();
+      document.body.style.overflow = overflow;
+      const target =
+        previous?.isConnected && previous !== document.body
+          ? previous
+          : document.querySelector<HTMLButtonElement>(".mini-track");
+      target?.focus({ preventScroll: true });
+    };
+  }, []);
   return (
-    <div
+    <dialog
+      ref={dialog}
       className="now-playing"
-      role="dialog"
       aria-modal="true"
       aria-label="Tocando agora"
-      onKeyDown={(event) => {
-        if (event.key === "Escape") p.setExpanded(false);
+      onCancel={(event) => {
+        event.preventDefault();
+        p.setExpanded(false);
       }}
     >
       <div className="now-inner">
@@ -289,7 +353,7 @@ function NowPlaying() {
             aria-label="Voltar"
             onClick={() => p.setExpanded(false)}
           >
-            <ChevronDown />
+            <ArrowLeft />
           </button>
           <span>TOCANDO AGORA</span>
           <details className="dropdown">
@@ -298,7 +362,11 @@ function NowPlaying() {
             </summary>
             <div className="dropdown-menu">
               <button onClick={() => enqueue(e)}>Adicionar à fila</button>
-              <button onClick={() => favorite(e)}>Favoritar</button>
+              <button onClick={() => favorite(e)}>
+                {library.favorites.some((x) => x.id === e.id)
+                  ? "Remover dos favoritos"
+                  : "Favoritar"}
+              </button>
               <button
                 onClick={async () => {
                   try {
@@ -316,8 +384,11 @@ function NowPlaying() {
               >
                 Compartilhar
               </button>
-              <button onClick={() => setDescription(!description)}>
-                Ver descrição
+              <button
+                aria-expanded={description}
+                onClick={() => setDescription(!description)}
+              >
+                {description ? "Ocultar descrição" : "Ver descrição"}
               </button>
               <Link
                 onClick={() => p.setExpanded(false)}
@@ -331,48 +402,11 @@ function NowPlaying() {
         <div className="vinyl-area">
           <span className="ring-time elapsed">{formatTime(p.position)}</span>
           <div className="vinyl-wrap">
-            <svg
-              viewBox="0 0 320 320"
-              className="progress-ring"
-              role="slider"
-              aria-label="Progresso do episódio"
-              aria-valuemin={0}
-              aria-valuemax={p.duration}
-              aria-valuenow={p.position}
-              tabIndex={0}
-              onKeyDown={(event) => {
-                if (event.key === "ArrowRight") p.seek(p.position + 15);
-                if (event.key === "ArrowLeft") p.seek(p.position - 15);
-              }}
-              onPointerDown={(event) => {
-                event.currentTarget.setPointerCapture(event.pointerId);
-                ringSeek(event);
-              }}
-              onPointerMove={(event) => {
-                if (event.buttons === 1) ringSeek(event);
-              }}
-            >
-              <circle
-                cx="160"
-                cy="160"
-                r="154"
-                fill="none"
-                stroke="#292b35"
-                strokeWidth="2"
-              />
-              <circle
-                cx="160"
-                cy="160"
-                r="154"
-                fill="none"
-                stroke="var(--accent)"
-                strokeWidth="3"
-                strokeDasharray={968}
-                strokeDashoffset={968 * (1 - percent)}
-                transform="rotate(-90 160 160)"
-                strokeLinecap="round"
-              />
-            </svg>
+            <ProgressRing
+              position={p.position}
+              duration={p.duration}
+              onSeek={p.seek}
+            />
             <div className={`vinyl ${p.playing ? "spinning" : ""}`}>
               <img
                 src={e.image || "/icons/icon-512.png"}
@@ -444,7 +478,7 @@ function NowPlaying() {
             >
               {[0.75, 1, 1.25, 1.5, 1.75, 2].map((n) => (
                 <option key={n} value={n}>
-                  {n}×
+                  {n.toLocaleString("pt-BR")}×
                 </option>
               ))}
             </select>
@@ -469,6 +503,8 @@ function NowPlaying() {
             <span>Timer de sono</span>
           </label>
           <button
+            aria-label="Favoritar episódio"
+            aria-pressed={library.favorites.some((x) => x.id === e.id)}
             className={
               library.favorites.some((x) => x.id === e.id) ? "accent" : ""
             }
@@ -486,7 +522,7 @@ function NowPlaying() {
         )}
         <div className="up-next">
           <div className="section-heading">
-            <h2>A seguir</h2>
+            <h2>A SEGUIR</h2>
             <Link
               href="/biblioteca?tab=fila"
               onClick={() => p.setExpanded(false)}
@@ -505,6 +541,6 @@ function NowPlaying() {
           )}
         </div>
       </div>
-    </div>
+    </dialog>
   );
 }

@@ -14,6 +14,8 @@ export default function SearchPage() {
   useEffect(() => {
     if (!query.trim()) {
       setResults([]);
+      setLoading(false);
+      setError("");
       return;
     }
     const controller = new AbortController();

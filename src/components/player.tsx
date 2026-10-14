@@ -108,11 +108,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     });
   }, [update]);
   const play = useCallback(
-    (e: Episode) => {
+    (e: Episode, rememberPrevious = true) => {
       const a = audio.current;
       if (!a) return;
       flush();
-      if (selected.current && selected.current.id !== e.id)
+      if (retryTimer.current) {
+        clearTimeout(retryTimer.current);
+        retryTimer.current = null;
+      }
+      if (rememberPrevious && selected.current && selected.current.id !== e.id)
         previousEpisodes.current.push(selected.current);
       selected.current = e;
       setEpisode(e);
@@ -147,7 +151,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, [flush, play, setMessage]);
   const previous = useCallback(() => {
     const e = previousEpisodes.current.pop();
-    if (e) play(e);
+    if (e) play(e, false);
     else if (audio.current) audio.current.currentTime = 0;
   }, [play]);
   const seek = useCallback(

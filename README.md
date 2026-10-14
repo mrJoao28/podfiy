@@ -2,7 +2,7 @@
 
 App pessoal de podcasts em pt-BR. Next.js App Router, TypeScript estrito, Tailwind, IndexedDB e Supabase. Áudio original, sem servidor de streaming próprio e sem APIs pagas.
 
-**Validação nesta entrega:** testes de estatísticas, sequência, RSS e duração executados com ferramentas já disponíveis no cache do ambiente; checagem de sintaxe do TypeScript/TSX e checagem estrita dos módulos `stats.ts` e `types.ts`. A instalação das dependências do app foi bloqueada (`EACCES` na conexão com registry.npmjs.org). O build completo e o teste em navegador/Android dependem de executar os comandos abaixo em um ambiente com acesso ao npm. Não houve deploy na Vercel nem execução remota da migração.
+**Validação:** 12 testes unitários de sequência, top 5, tempo ouvido, agregação semanal/mensal e RSS; TypeScript estrito e build de produção. O teste de navegador usa Chrome local e dados simulados, sem acessar sua biblioteca pessoal. Login/sincronização com a conta real e reprodução com tela bloqueada precisam de verificação no seu dispositivo. Não houve deploy na Vercel nem execução remota da migração.
 
 ## Rodar
 
@@ -39,6 +39,10 @@ npm run build
 ```
 
 Testes cobrem duração, RSS/enclosure/CDATA, rejeição de entidades, sequência no fuso America/Manaus e top 5 por intervalo. `node scripts/icons.mjs` regenera os ícones PNG sem dependências. Fonte Inter usa Google Fonts com fallback de sistema.
+
+Para a checagem local de interface, inicie `npm run dev -- --port 3100` e, em outro terminal, execute `npm run test:browser`. O script usa Chrome headless em um perfil isolado dentro de `.qa/`, testa fluxos com um feed e áudio locais e salva capturas nessa pasta (ignorada pelo Git). `PODFIY_CHROME` permite escolher outro caminho do Chrome; `PODFIY_URL` permite mudar a URL local. Não instala dependências de navegador.
+
+O player abre como folha no celular, com foco contido e retorno ao controle de origem. O anel permite arrastar e usar setas/Home/End; a busca no áudio é confirmada ao soltar. Episódios aparecem em lotes de 20 com “Carregar mais”; filtros reiniciam a contagem. A aba Fila permanece na URL. A meta diária fica visível no celular e nas estatísticas, com aviso discreto ao ser atingida.
 
 Teste manual em Android: instalar; tocar; bloquear a tela; pausar/retomar e saltar pela notificação; navegar pelas abas; avançar ao fim com fila; colocar timer; reabrir e verificar posição; entrar com a mesma conta em outro dispositivo. Medição registra segundos reais de avanço, exclui pausas e saltos; velocidade não multiplica horas ouvidas. Meta padrão: cinco minutos por dia em Manaus.
 

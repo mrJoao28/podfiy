@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import {
   ArrowUpRight,
   ArrowRight,
-  Flame,
   Sparkles,
   Play,
   Headphones,
@@ -12,18 +11,28 @@ import {
 import { useLibrary } from "@/components/provider";
 import { usePlayer } from "@/components/player";
 import { PodcastCard, EpisodeRow, Cover, Loading } from "@/components/ui";
-import { streak, localDay } from "@/lib/stats";
+import { DailyGoal } from "@/components/daily-goal";
 import type { Podcast, Episode } from "@/lib/types";
 export default function Home() {
   const { library, ready } = useLibrary();
   const player = usePlayer();
   const [discover, setDiscover] = useState<Podcast[]>([]);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
-  const sequence = streak(library.sessions, library.settings.dailyGoal);
+  const [discoverError, setDiscoverError] = useState("");
+  const [feedError, setFeedError] = useState("");
+  const [discoverLoading, setDiscoverLoading] = useState(true);
+  const [feedsLoading, setFeedsLoading] = useState(true);
+  const [refresh, setRefresh] = useState(0);
   useEffect(() => {
+    if (!ready) return;
+    if (library.subscriptions.length) {
+      setDiscoverLoading(false);
+      setDiscoverError("");
+      return;
+    }
     const controller = new AbortController();
+    setDiscoverLoading(true);
+    setDiscoverError("");
     fetch("/api/search?q=ciência%20cultura", { signal: controller.signal })
       .then(async (r) => {
         const d = await r.json();
@@ -31,16 +40,19 @@ export default function Home() {
         setDiscover(d.podcasts.slice(0, 6));
       })
       .catch((e) => {
-        if (e.name !== "AbortError") setError(e.message);
+        if (e.name !== "AbortError") setDiscoverError(e.message);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!controller.signal.aborted) setDiscoverLoading(false);
+      });
     return () => controller.abort();
-  }, []);
+  }, [ready, library.subscriptions.length, refresh]);
   const feeds = library.subscriptions.map((p) => p.feed).join("|");
   useEffect(() => {
     if (!ready) return;
     const controller = new AbortController();
-    setLoading(true);
+    setFeedsLoading(true);
+    setFeedError("");
     Promise.allSettled(
       library.subscriptions.map((p) =>
         fetch(`/api/feed?url=${encodeURIComponent(p.feed)}`, {
@@ -53,6 +65,7 @@ export default function Home() {
       ),
     )
       .then((results) => {
+        if (controller.signal.aborted) return;
         setEpisodes(
           results
             .flatMap((r) => (r.status === "fulfilled" ? r.value : []))
@@ -63,21 +76,19 @@ export default function Home() {
             (r) => r.status === "rejected" && r.reason?.name !== "AbortError",
           )
         )
-          setError(
+          setFeedError(
             "Alguns feeds não puderam ser atualizados. Tente novamente mais tarde.",
           );
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!controller.signal.aborted) setFeedsLoading(false);
+      });
     return () => controller.abort();
-  }, [feeds, ready]);
+  }, [feeds, ready, refresh]);
   const continuing = Object.values(library.progress)
     .filter((p) => !p.listened && p.position > 0)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  const progress = Math.min(
-    100,
-    ((sequence.days[localDay(new Date())] ?? 0) / library.settings.dailyGoal) *
-      100,
-  );
+  const newEpisodes = episodes.filter((e) => !library.progress[e.id]?.listened);
   return (
     <div className="page home-page">
       <div className="page-heading">
@@ -138,34 +149,7 @@ export default function Home() {
             </span>
           </div>
         </section>
-        <section className="streak-card">
-          <div className="streak-card-top">
-            <span className="eyebrow">UM HÁBITO QUE FAZ BEM</span>
-            <Flame size={21} />
-          </div>
-          <div className="streak-number">
-            {sequence.current}
-            <span>{sequence.current === 1 ? "dia" : "dias"}</span>
-          </div>
-          <h3>A curiosidade não para.</h3>
-          <p>
-            Ouça um pouquinho hoje e<br />
-            mantenha sua sequência viva.
-          </p>
-          <div className="goal-bar">
-            <span style={{ width: `${progress}%` }} />
-          </div>
-          <div className="goal-caption">
-            <span>Meta de hoje</span>
-            <b>
-              {Math.floor((sequence.days[localDay(new Date())] ?? 0) / 60)}/
-              {Math.ceil(library.settings.dailyGoal / 60)} min
-            </b>
-          </div>
-          <Link href="/estatisticas">
-            Meu progresso <ArrowRight size={15} />
-          </Link>
-        </section>
+        {ready && <DailyGoal />}
       </div>
       {continuing.length > 0 && (
         <section className="section">
@@ -231,10 +215,18 @@ export default function Home() {
             ))}
           </div>
         )}
-        {loading && !discover.length && <Loading />}
-        {error && (
+        {ready && discoverLoading && !library.subscriptions.length && (
+          <Loading />
+        )}
+        {discoverError && (
           <p className="error" role="alert">
-            {error} <Link href="/buscar">Abrir busca</Link>
+            {discoverError}{" "}
+            <button
+              className="text-button"
+              onClick={() => setRefresh((n) => n + 1)}
+            >
+              Tentar novamente
+            </button>
           </p>
         )}
       </section>
@@ -244,38 +236,55 @@ export default function Home() {
             <span className="eyebrow">HISTÓRIAS FRESQUINHAS</span>
             <h2>
               Novos episódios{" "}
-              <span className="count-badge">
-                {
-                  episodes.filter((e) => !library.progress[e.id]?.listened)
-                    .length
-                }
-              </span>
+              <span className="count-badge">{newEpisodes.length}</span>
             </h2>
           </div>
           <Link href="/biblioteca">
             Minha biblioteca <ArrowUpRight size={15} />
           </Link>
         </div>
-        {episodes
-          .filter((e) => !library.progress[e.id]?.listened)
-          .slice(0, 6)
-          .map((e) => (
-            <EpisodeRow key={e.id} episode={e} />
-          ))}
-        {!episodes.length && (
-          <Link href="/buscar" className="new-episodes-empty">
-            <span className="empty-icon">
-              <Sparkles size={24} />
-            </span>
-            <div>
-              <h3>As próximas histórias começam aqui.</h3>
-              <p>
-                Assine seus podcasts favoritos para receber novos episódios.
-              </p>
-            </div>
-            <ArrowRight size={20} />
-          </Link>
+        {feedError && (
+          <p className="error" role="alert">
+            {feedError}{" "}
+            <button
+              className="text-button"
+              onClick={() => setRefresh((n) => n + 1)}
+            >
+              Atualizar feeds
+            </button>
+          </p>
         )}
+        {(!ready || feedsLoading) && <Loading />}
+        {newEpisodes.slice(0, 6).map((e) => (
+          <EpisodeRow key={e.id} episode={e} />
+        ))}
+        {ready &&
+          !feedsLoading &&
+          !feedError &&
+          !library.subscriptions.length && (
+            <Link href="/buscar" className="new-episodes-empty">
+              <span className="empty-icon">
+                <Sparkles size={24} />
+              </span>
+              <div>
+                <h3>As próximas histórias começam aqui.</h3>
+                <p>
+                  Assine seus podcasts favoritos para receber novos episódios.
+                </p>
+              </div>
+              <ArrowRight size={20} />
+            </Link>
+          )}
+        {ready &&
+          !feedsLoading &&
+          !feedError &&
+          !!library.subscriptions.length &&
+          !newEpisodes.length && (
+            <p className="caught-up">
+              Tudo em dia. Os próximos episódios das suas assinaturas aparecem
+              aqui.
+            </p>
+          )}
       </section>
       <div className="listening-note">
         <span>✦</span> Menos ruído. Mais boas histórias.

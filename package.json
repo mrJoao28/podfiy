@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts",
+    "test:browser": "node scripts/browser-smoke.mjs"
   },
   "dependencies": {
     "next": "^16.0.0",

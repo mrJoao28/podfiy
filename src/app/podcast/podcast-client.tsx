@@ -15,11 +15,14 @@ export function PodcastPage() {
   } | null>(null);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("");
-  const { library, subscribe, favorite } = useLibrary();
+  const [visibleCount, setVisibleCount] = useState(20);
+  const [attempt, setAttempt] = useState(0);
+  const { library, subscribe, favorite, ready } = useLibrary();
   const player = usePlayer();
   useEffect(() => {
     setData(null);
     setError("");
+    setVisibleCount(20);
     if (!feed) {
       setError("URL do feed não informada.");
       return;
@@ -35,7 +38,7 @@ export function PodcastPage() {
         if (e.name !== "AbortError") setError(e.message);
       });
     return () => c.abort();
-  }, [feed]);
+  }, [feed, attempt]);
   if (error)
     return (
       <div className="page">
@@ -45,11 +48,25 @@ export function PodcastPage() {
         <div className="error" role="alert">
           {error}
         </div>
+        <button
+          className="secondary-button"
+          onClick={() => setAttempt((n) => n + 1)}
+        >
+          Tentar novamente
+        </button>
       </div>
     );
   if (!data) return <Loading />;
   const p = data.podcast;
   const subscribed = library.subscriptions.some((x) => x.feed === p.feed);
+  const filtered = data.episodes.filter((e) =>
+    e.title
+      .toLocaleLowerCase("pt-BR")
+      .includes(filter.trim().toLocaleLowerCase("pt-BR")),
+  );
+  const favorited = library.favorites.some(
+    (x) => !("audio" in x) && x.feed === p.feed,
+  );
   return (
     <div className="page podcast-page">
       <div
@@ -66,14 +83,25 @@ export function PodcastPage() {
           <h1>{p.title}</h1>
           <p className="podcast-author">{p.author}</p>
           <div className="podcast-buttons">
-            <button className="primary-button" onClick={() => subscribe(p)}>
+            <button
+              className="primary-button"
+              disabled={!ready}
+              aria-pressed={subscribed}
+              onClick={() => subscribe(p)}
+            >
               {subscribed ? <Check size={17} /> : <Plus size={17} />}{" "}
               {subscribed ? "Assinado" : "Assinar podcast"}
             </button>
             <button
               className={`icon-button outlined ${library.favorites.some((x) => !("audio" in x) && x.feed === p.feed) ? "accent" : ""}`}
               onClick={() => favorite(p)}
-              aria-label="Favoritar podcast"
+              disabled={!ready}
+              aria-label={
+                favorited
+                  ? "Remover podcast dos favoritos"
+                  : "Favoritar podcast"
+              }
+              aria-pressed={favorited}
             >
               <Heart size={19} />
             </button>
@@ -103,17 +131,35 @@ export function PodcastPage() {
             placeholder="Filtrar episódios…"
             aria-label="Filtrar episódios"
             value={filter}
-            onChange={(e) => setFilter(e.target.value)}
+            onChange={(e) => {
+              setFilter(e.target.value);
+              setVisibleCount(20);
+            }}
           />
-          {data.episodes
-            .filter((e) =>
-              e.title
-                .toLocaleLowerCase("pt-BR")
-                .includes(filter.toLocaleLowerCase("pt-BR")),
-            )
-            .map((e, i) => (
-              <EpisodeRow key={e.id} episode={e} index={i} />
-            ))}
+          {filtered.slice(0, visibleCount).map((e, i) => (
+            <EpisodeRow key={e.id} episode={e} index={i} />
+          ))}
+          {!!data.episodes.length && !filtered.length && (
+            <Empty title="Nenhum episódio encontrado">
+              Tente outra palavra no filtro.
+            </Empty>
+          )}
+          {!!filtered.length && (
+            <div className="load-more">
+              <p className="muted" role="status">
+                {Math.min(visibleCount, filtered.length)} de {filtered.length}{" "}
+                episódios
+              </p>
+              {visibleCount < filtered.length && (
+                <button
+                  className="secondary-button"
+                  onClick={() => setVisibleCount((n) => n + 20)}
+                >
+                  Carregar mais episódios
+                </button>
+              )}
+            </div>
+          )}
           {!data.episodes.length && (
             <Empty title="Nenhum episódio de áudio">
               Este feed ainda não publicou arquivos de áudio.

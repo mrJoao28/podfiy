@@ -1,7 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { ArrowDown, ArrowUp, Trash2, Plus } from "lucide-react";
 import { useLibrary } from "@/components/provider";
 import { PodcastCard, EpisodeRow, Empty, Loading } from "@/components/ui";
@@ -14,7 +13,11 @@ const tabs = [
 ];
 export function LibraryPage() {
   const params = useSearchParams();
-  const [tab, setTab] = useState(params.get("tab") ?? "assinaturas");
+  const router = useRouter();
+  const requested = params.get("tab");
+  const tab = tabs.some(([key]) => key === requested)
+    ? requested
+    : "assinaturas";
   const { library, ready, update } = useLibrary();
   function move(index: number, delta: number) {
     update((s) => {
@@ -44,7 +47,10 @@ export function LibraryPage() {
           <button
             key={key}
             className={tab === key ? "selected" : ""}
-            onClick={() => setTab(key)}
+            aria-pressed={tab === key}
+            onClick={() =>
+              router.replace(`/biblioteca?tab=${key}`, { scroll: false })
+            }
           >
             {label}
             <span>
@@ -83,14 +89,14 @@ export function LibraryPage() {
                 <EpisodeRow episode={e} index={i} />
                 <div className="queue-actions">
                   <button
-                    aria-label="Mover para cima"
+                    aria-label={`Mover ${e.title} para cima`}
                     disabled={i === 0}
                     onClick={() => move(i, -1)}
                   >
                     <ArrowUp size={16} />
                   </button>
                   <button
-                    aria-label="Mover para baixo"
+                    aria-label={`Mover ${e.title} para baixo`}
                     disabled={i === library.queue.length - 1}
                     onClick={() => move(i, 1)}
                   >

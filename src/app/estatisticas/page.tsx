@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Flame, Clock3, Headphones, Trophy } from "lucide-react";
 import { useLibrary } from "@/components/provider";
 import { Cover, Empty, Loading } from "@/components/ui";
+import { DailyGoal, useToday } from "@/components/daily-goal";
 import {
   dayOffset,
   localDay,
@@ -14,7 +15,7 @@ export default function Stats() {
   const { library, ready } = useLibrary();
   const [filter, setFilter] = useState(30);
   const [group, setGroup] = useState<"week" | "month">("week");
-  const now = new Date();
+  const now = useToday();
   const seq = streak(library.sessions, library.settings.dailyGoal, now);
   const cutoff = filter ? now.getTime() - filter * 86400000 : 0;
   const sessions = library.sessions.filter(
@@ -54,6 +55,7 @@ export default function Stats() {
             <button
               key={v}
               className={filter === v ? "selected" : ""}
+              aria-pressed={filter === v}
               onClick={() => setFilter(Number(v))}
             >
               {label}
@@ -84,7 +86,11 @@ export default function Stats() {
             }),
             label: "horas nos últimos 30 dias",
           },
-          { icon: Flame, value: seq.current, label: "dias em sequência" },
+          {
+            icon: Flame,
+            value: seq.current,
+            label: seq.current === 1 ? "dia em sequência" : "dias em sequência",
+          },
         ].map((s, i) => (
           <div className="stat-card" key={i}>
             <s.icon size={23} />
@@ -93,6 +99,7 @@ export default function Stats() {
           </div>
         ))}
       </div>
+      <DailyGoal compact />
       <section className="panel section">
         <div className="section-heading">
           <div>
@@ -100,7 +107,8 @@ export default function Stats() {
             <h2>Sua curiosidade, dia após dia</h2>
           </div>
           <span className="record">
-            <Trophy size={16} /> Recorde: {seq.longest} dias
+            <Trophy size={16} /> Recorde: {seq.longest}{" "}
+            {seq.longest === 1 ? "dia" : "dias"}
           </span>
         </div>
         <div
@@ -113,6 +121,8 @@ export default function Stats() {
               <div
                 key={day}
                 title={`${day}: ${Math.floor(seconds / 60)} min`}
+                role="img"
+                aria-label={`${day}: ${Math.floor(seconds / 60)} minutos${seconds >= library.settings.dailyGoal ? ", meta concluída" : ""}`}
                 className={
                   seconds >= library.settings.dailyGoal
                     ? "heat-active"
@@ -149,10 +159,22 @@ export default function Stats() {
               <option value="month">Por mês</option>
             </select>
           </div>
-          <div className="bar-chart">
+          <div
+            className="bar-chart"
+            role="img"
+            aria-label={`Horas de escuta por ${group === "week" ? "semana" : "mês"}. ${bars.map((b) => `${b.label}: ${(b.seconds / 3600).toLocaleString("pt-BR", { maximumFractionDigits: 2 })} horas`).join("; ")}`}
+          >
             {bars.map((b, i) => (
-              <div key={i}>
-                <span>{(b.seconds / 3600).toFixed(1)}h</span>
+              <div
+                key={i}
+                title={`${b.label}: ${(b.seconds / 3600).toLocaleString("pt-BR", { maximumFractionDigits: 2 })} horas`}
+              >
+                <span>
+                  {(b.seconds / 3600).toLocaleString("pt-BR", {
+                    maximumFractionDigits: 1,
+                  })}
+                  h
+                </span>
                 <div
                   style={{
                     height: `${Math.max(2, (b.seconds / max) * 160)}px`,
@@ -200,7 +222,7 @@ export default function Stats() {
               </div>
             ))
           ) : (
-            <Empty title="Seus favoritos vão aparecer aqui">
+            <Empty title="Seus podcasts mais ouvidos aparecem aqui">
               Dê o play para começar a conhecer seu ritmo.
             </Empty>
           )}

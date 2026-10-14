@@ -85,3 +85,36 @@ test("top 5 soma sessões, ordena e aplica janela temporal", () => {
   assert.equal(topPodcasts(s)[0].id, "old");
   assert.deepEqual(topPodcasts([]), []);
 });
+
+test("sequência fecha a meta exata e atravessa ano e meia-noite de Manaus", () => {
+  const now = new Date("2027-01-01T04:00:01Z");
+  const sessions = [
+    session("2026-12-31T12:00:00Z", 300),
+    session("2027-01-01T04:00:00Z", 299.5),
+  ];
+  assert.equal(streak(sessions, 300, now).current, 1);
+  sessions.push(session("2027-01-01T04:00:01Z", 0.5));
+  assert.equal(streak(sessions, 300, now).current, 2);
+  assert.equal(streak(sessions, 300, now).longest, 2);
+  assert.equal(localDay("2027-01-01T03:59:59Z"), "2026-12-31");
+});
+
+test("top 5 respeita 7 dias, 30 dias, ano e tudo; desempata de forma estável", () => {
+  const now = new Date("2026-10-14T12:00:00Z");
+  const ago = (days: number) =>
+    new Date(now.getTime() - days * 86400000).toISOString();
+  const sessions = [
+    session(ago(1), 60, "A"),
+    session(ago(1), 60, "B"),
+    session(ago(8), 120, "C"),
+    session(ago(31), 180, "D"),
+    session(ago(366), 240, "E"),
+  ];
+  assert.deepEqual(
+    topPodcasts(sessions, 7, now).map((p) => p.id),
+    ["A", "B"],
+  );
+  assert.equal(topPodcasts(sessions, 30, now)[0].id, "C");
+  assert.equal(topPodcasts(sessions, 365, now)[0].id, "D");
+  assert.equal(topPodcasts(sessions, 0, now)[0].id, "E");
+});

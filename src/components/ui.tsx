@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { useState } from "react";
 import {
   Heart,
   Play,
@@ -22,20 +23,24 @@ export function Cover({
   title: string;
   className?: string;
 }) {
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
   return (
     <div className={`cover ${className}`}>
-      {src ? (
+      {src && failedSrc !== src ? (
         <img
           src={src}
           alt={title}
           loading="lazy"
           referrerPolicy="no-referrer"
-          onError={(e) => {
-            e.currentTarget.style.display = "none";
-          }}
+          onError={() => setFailedSrc(src)}
         />
       ) : (
-        <Headphones size={32} />
+        <Headphones
+          size={32}
+          role={title ? "img" : undefined}
+          aria-label={title || undefined}
+          aria-hidden={!title}
+        />
       )}
     </div>
   );
@@ -43,6 +48,9 @@ export function Cover({
 export function PodcastCard({ podcast }: { podcast: Podcast }) {
   const { library, subscribe, favorite } = useLibrary();
   const subscribed = library.subscriptions.some((p) => p.feed === podcast.feed);
+  const favorited = library.favorites.some(
+    (p) => !("audio" in p) && p.feed === podcast.feed,
+  );
   return (
     <article className="podcast-card">
       <Link href={`/podcast?feed=${encodeURIComponent(podcast.feed)}`}>
@@ -53,13 +61,19 @@ export function PodcastCard({ podcast }: { podcast: Podcast }) {
       <div className="card-actions">
         <button
           className={subscribed ? "subscribed" : ""}
+          aria-pressed={subscribed}
           onClick={() => subscribe(podcast)}
         >
           {subscribed ? <Check size={14} /> : <Plus size={14} />}{" "}
           {subscribed ? "Na biblioteca" : "Assinar"}
         </button>
         <button
-          aria-label="Favoritar podcast"
+          aria-label={
+            favorited
+              ? `Remover ${podcast.title} dos favoritos`
+              : `Favoritar ${podcast.title}`
+          }
+          aria-pressed={favorited}
           className={
             library.favorites.some(
               (p) => !("audio" in p) && p.feed === podcast.feed,
@@ -69,7 +83,7 @@ export function PodcastCard({ podcast }: { podcast: Podcast }) {
           }
           onClick={() => favorite(podcast)}
         >
-          <Heart size={16} />
+          <Heart size={16} fill={favorited ? "currentColor" : "none"} />
         </button>
       </div>
     </article>
@@ -86,13 +100,15 @@ export function EpisodeRow({
   const player = usePlayer();
   const current = player.episode?.id === episode.id;
   const listened = library.progress[episode.id]?.listened;
+  const favorited = library.favorites.some((p) => p.id === episode.id);
   return (
     <article
       className={`episode-row ${current ? "current" : ""} ${listened ? "listened" : ""}`}
+      aria-current={current ? "true" : undefined}
     >
       <button
         className="episode-art"
-        aria-label={`Ouvir ${episode.title}`}
+        aria-label={`${current && player.playing ? "Pausar" : "Ouvir"} ${episode.title}`}
         onClick={() => (current ? player.toggle() : player.play(episode))}
       >
         {index !== undefined ? (
@@ -134,16 +150,22 @@ export function EpisodeRow({
       <button
         className={`icon-button favorite-button ${library.favorites.some((p) => p.id === episode.id) ? "accent" : ""}`}
         title="Favoritar"
-        aria-label="Favoritar episódio"
+        aria-label={
+          favorited ? "Remover episódio dos favoritos" : "Favoritar episódio"
+        }
+        aria-pressed={favorited}
         onClick={() => favorite(episode)}
       >
-        <Heart size={18} />
+        <Heart size={18} fill={favorited ? "currentColor" : "none"} />
       </button>
       <details className="dropdown">
         <summary className="icon-button" aria-label="Opções do episódio">
           <MoreHorizontal size={20} />
         </summary>
         <div className="dropdown-menu">
+          <button onClick={() => favorite(episode)}>
+            {favorited ? "Remover dos favoritos" : "Favoritar episódio"}
+          </button>
           <button onClick={() => enqueue(episode)}>Adicionar à fila</button>
           <button
             onClick={() =>
