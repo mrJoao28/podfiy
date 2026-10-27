@@ -2880,3 +2880,10 @@ p {
     scroll-behavior: auto !important;
   }
 }
+
+
+.backup-import { display: grid; gap: 12px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
+.backup-import > label { font-weight: 600; }
+.backup-import input[type="file"] { max-width: 100%; font: inherit; color: var(--muted); }
+.backup-import input::file-selector-button { margin-right: 12px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); cursor: pointer; }
+.backup-preview { display: grid; gap: 12px; }
