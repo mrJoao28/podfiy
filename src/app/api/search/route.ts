@@ -1,19 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ClientRateLimiter, clientKey } from "@/lib/rate-limit";
+export const runtime = "nodejs";
+const limiter = new ClientRateLimiter(18);
 const cache = new Map<string, { at: number; data: unknown }>();
-let calls: number[] = [];
 export async function GET(request: NextRequest) {
   const term = request.nextUrl.searchParams.get("q")?.trim().slice(0, 150);
   if (!term) return NextResponse.json({ podcasts: [] });
+  const quota = limiter.consume(clientKey(request.headers));
+  if (!quota.allowed)
+    return NextResponse.json(
+      { error: "Muitas buscas neste dispositivo. Aguarde e tente novamente." },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(quota.retryAfter),
+          "Cache-Control": "no-store",
+        },
+      },
+    );
   const key = term.toLowerCase();
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < 1800000) return NextResponse.json(hit.data);
-  calls = calls.filter((t) => Date.now() - t < 60000);
-  if (calls.length >= 18)
-    return NextResponse.json(
-      { error: "Muitas buscas. Tente novamente em um minuto." },
-      { status: 429, headers: { "Retry-After": "60" } },
-    );
-  calls.push(Date.now());
   try {
     const url = new URL("https://itunes.apple.com/search");
     url.search = new URLSearchParams({
