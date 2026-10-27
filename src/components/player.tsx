@@ -37,6 +37,8 @@ export const usePlayer = () => {
 export function PlayerProvider({ children }: { children: ReactNode }) {
   const { library, update, setMessage, ready, user } = useLibrary();
   const audio = useRef<HTMLAudioElement>(null);
+  const readyRef = useRef(ready);
+  readyRef.current = ready;
   const state = useRef(library);
   state.current = library;
   const [episode, setEpisode] = useState<Episode | null>(null);
@@ -110,7 +112,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const play = useCallback(
     (e: Episode, rememberPrevious = true) => {
       const a = audio.current;
-      if (!a) return;
+      if (!a || !readyRef.current) return;
       flush();
       if (retryTimer.current) {
         clearTimeout(retryTimer.current);
@@ -187,8 +189,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setSleepState(minutes);
   };
   useEffect(() => {
-    if (!ready) return;
     selected.current = null;
+    if (!ready) {
+      pendingSeconds.current = 0;
+      lastTick.current = null;
+      if (retryTimer.current) clearTimeout(retryTimer.current);
+      audio.current?.pause();
+      setPlaying(false);
+      return;
+    }
     pendingSeconds.current = 0;
     lastTick.current = null;
     previousEpisodes.current = [];

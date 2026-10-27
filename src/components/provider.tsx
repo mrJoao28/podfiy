@@ -12,13 +12,14 @@ import type { User } from "@supabase/supabase-js";
 import {
   emptyLibrary,
   type Library,
-  type CollectionKey,
   type Episode,
   type Podcast,
 } from "@/lib/types";
 import { readLibrary, writeLibrary } from "@/lib/db";
 import { supabase } from "@/lib/supabase";
 import { pullRemote, pushRemote } from "@/lib/sync";
+import { stampLibraryChange } from "@/lib/library-merge";
+import { SyncCoordinator } from "@/lib/sync-coordinator";
 type Store = {
   library: Library;
   ready: boolean;
@@ -47,123 +48,146 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const current = useRef(library);
   const account = useRef<string>("local");
   const initialized = useRef(false);
-  const syncBusy = useRef(false);
+  const generation = useRef(0);
+  const coordinator = useRef<SyncCoordinator | null>(null);
+  if (!coordinator.current) {
+    coordinator.current = new SyncCoordinator({
+      current: () => current.current,
+      apply: (next) => {
+        current.current = next;
+        setLibrary(next);
+      },
+      pull: pullRemote,
+      push: pushRemote,
+    });
+  }
   const update = useCallback((fn: (s: Library) => Library) => {
-    const s = current.current;
-    const next = fn(s);
-    const dates = { ...next.collectionDates };
-    for (const key of [
-      "subscriptions",
-      "favorites",
-      "queue",
-      "history",
-      "settings",
-    ] as CollectionKey[]) {
-      if (next[key] !== s[key] && next.collectionDates === s.collectionDates)
-        dates[key] = new Date().toISOString();
-    }
-    const stamped = { ...next, collectionDates: dates };
+    if (!initialized.current) return;
+    const stamped = stampLibraryChange(current.current, fn(current.current));
     current.current = stamped;
     setLibrary(stamped);
   }, []);
-  const sync = useCallback(async () => {
-    if (!supabase || account.current === "local" || syncBusy.current) return;
-    syncBusy.current = true;
+  const runSync = useCallback(async (pull: boolean) => {
+    if (!supabase || !initialized.current) return;
+    const ticket = generation.current;
     try {
-      const merged = await pullRemote(account.current, current.current);
-      update(() => merged);
-      await pushRemote(account.current, merged);
+      await coordinator.current!.run(pull);
     } catch (e) {
-      setMessage((e as Error).message);
-    } finally {
-      syncBusy.current = false;
+      if (ticket === generation.current) setMessage((e as Error).message);
     }
-  }, [update]);
+  }, []);
+  const sync = useCallback(() => runSync(true), [runSync]);
   useEffect(() => {
     let alive = true;
-    let generation = 0;
+    let loadingKey: string | null = null;
     async function load(next: User | null) {
-      // Supabase may emit SIGNED_IN again when a tab regains focus.
-      if (initialized.current && account.current === (next?.id ?? "local")) {
+      const key = next?.id ?? "local";
+      if (loadingKey === key) return;
+      if (initialized.current && account.current === key) {
         setUser(next);
         return;
       }
-      const ticket = ++generation;
+      const ticket = ++generation.current;
+      loadingKey = key;
+      const previous = initialized.current
+        ? { key: account.current, state: current.current }
+        : null;
+      initialized.current = false;
+      coordinator.current!.activate(null);
       setReady(false);
       try {
-        const key = next?.id ?? "local";
+        // Capture the old account's key before any asynchronous work.
+        if (previous) await writeLibrary(previous.state, previous.key);
         let state = await readLibrary(key);
-        if (!alive || ticket !== generation) return;
-        account.current = key;
-        setUser(next);
+        if (!alive || ticket !== generation.current) return;
         if (next) {
           try {
             state = await pullRemote(next.id, state);
           } catch (e) {
-            setMessage((e as Error).message);
+            if (alive && ticket === generation.current)
+              setMessage((e as Error).message);
           }
         }
-        if (!alive || ticket !== generation) return;
+        if (!alive || ticket !== generation.current) return;
+        account.current = key;
         current.current = state;
         setLibrary(state);
+        setUser(next);
         initialized.current = true;
+        coordinator.current!.activate(key);
         setReady(true);
       } catch {
-        setMessage(
-          "Não foi possível abrir o armazenamento local. Permita dados de sites neste navegador.",
-        );
+        if (alive && ticket === generation.current)
+          setMessage(
+            "Não foi possível abrir o armazenamento local. Permita dados de sites neste navegador.",
+          );
+      } finally {
+        if (ticket === generation.current) loadingKey = null;
       }
     }
     if (supabase) {
+      const initialGeneration = generation.current;
       void supabase.auth
         .getSession()
-        .then(({ data }) => load(data.session?.user ?? null))
+        .then(({ data }) => {
+          if (alive && generation.current === initialGeneration)
+            void load(data.session?.user ?? null);
+        })
         .catch(() => {
-          setMessage(
-            "Não foi possível recuperar a conta. Abrindo o modo local.",
-          );
-          void load(null);
+          if (alive && generation.current === initialGeneration)
+            void load(null);
         });
       const { data } = supabase.auth.onAuthStateChange((event, session) => {
         if (event === "SIGNED_IN" || event === "SIGNED_OUT")
-          setTimeout(() => void load(session?.user ?? null), 0);
+          setTimeout(() => {
+            if (alive) void load(session?.user ?? null);
+          }, 0);
       });
       return () => {
         alive = false;
+        generation.current++;
+        coordinator.current!.activate(null);
+        initialized.current = false;
         data.subscription.unsubscribe();
       };
     }
     void load(null);
     return () => {
       alive = false;
+      generation.current++;
+      coordinator.current!.activate(null);
+      initialized.current = false;
     };
   }, []);
   useEffect(() => {
     if (!ready || !initialized.current) return;
+    const key = account.current;
+    const ticket = generation.current;
     const id = setTimeout(() => {
-      void writeLibrary(library, account.current).catch(() =>
-        setMessage("Falha ao salvar neste dispositivo."),
-      );
+      if (ticket !== generation.current || !initialized.current) return;
+      void writeLibrary(library, key).catch(() => {
+        if (ticket === generation.current)
+          setMessage("Falha ao salvar neste dispositivo.");
+      });
     }, 300);
     return () => clearTimeout(id);
   }, [library, ready]);
   useEffect(() => {
     if (!ready || !user) return;
+    const ticket = generation.current;
     const t = setTimeout(() => {
-      if (syncBusy.current) return;
-      syncBusy.current = true;
-      void pushRemote(user.id, current.current)
-        .catch((e) => setMessage(e.message))
-        .finally(() => {
-          syncBusy.current = false;
-        });
+      if (ticket === generation.current) void runSync(false);
     }, 3000);
     return () => clearTimeout(t);
-  }, [library, user, ready]);
+  }, [library, user, ready, runSync]);
   useEffect(() => {
     const save = () => {
-      if (initialized.current)
-        void writeLibrary(current.current, account.current);
+      if (!initialized.current) return;
+      const ticket = generation.current;
+      void writeLibrary(current.current, account.current).catch(() => {
+        if (ticket === generation.current)
+          setMessage("Falha ao salvar neste dispositivo.");
+      });
     };
     const online = () => void sync();
     window.addEventListener("online", online);
